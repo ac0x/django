@@ -993,7 +993,8 @@ def create_many_related_manager(superclass, rel):
             # If there aren't any objects, there is nothing to do.
             from django.db.models import Model
             if objs:
-                new_ids = set()
+                new_ids = []
+                seen = set()
                 for obj in objs:
                     if isinstance(obj, self.model):
                         if not router.allow_relation(obj, self.instance):
@@ -1008,7 +1009,9 @@ def create_many_related_manager(superclass, rel):
                                 'Cannot add "%r": the value for field "%s" is None' %
                                 (obj, target_field_name)
                             )
-                        new_ids.add(fk_val)
+                        if fk_val not in seen:
+                            new_ids.append(fk_val)
+                            seen.add(fk_val)
                     elif isinstance(obj, Model):
                         raise TypeError(
                             "'%s' instance expected, got %r" %
@@ -1016,13 +1019,17 @@ def create_many_related_manager(superclass, rel):
                         )
                     else:
                         new_ids.add(obj)
+                        if obj not in seen:
+                            new_ids.append(obj)
+                            seen.add(obj)
+
                 db = router.db_for_write(self.through, instance=self.instance)
                 vals = self.through._default_manager.using(db).values_list(target_field_name, flat=True)
                 vals = vals.filter(**{
                     source_field_name: self.related_val[0],
                     '%s__in' % target_field_name: new_ids,
                 })
-                new_ids = new_ids - set(vals)
+                new_ids = [new_id for new_id in new_ids if new_id not in set(vals)]
 
                 if self.reverse or source_field_name == self.source_field_name:
                     # Don't send the signal when we are inserting the
