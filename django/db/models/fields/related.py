@@ -1018,7 +1018,6 @@ def create_many_related_manager(superclass, rel):
                             (self.model._meta.object_name, obj)
                         )
                     else:
-                        new_ids.add(obj)
                         if obj not in seen:
                             new_ids.append(obj)
                             seen.add(obj)
