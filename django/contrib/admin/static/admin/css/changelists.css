@@ -64,6 +64,10 @@
     white-space: nowrap;
 }
 
+#changelist table tbody th {
+    white-space: nowrap;
+}
+
 #changelist table thead th.action-checkbox-column {
     width: 1.5em;
     text-align: center;
