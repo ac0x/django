@@ -17,6 +17,14 @@ class Author(models.Model):
         apps = new_apps
 
 
+class AuthorWithDefaultHeight(models.Model):
+    name = models.CharField(max_length=255)
+    height = models.PositiveIntegerField(null=True, blank=True, default=42)
+
+    class Meta:
+        apps = new_apps
+
+
 class AuthorWithM2M(models.Model):
     name = models.CharField(max_length=255)
 
@@ -59,11 +67,30 @@ class BookWeak(models.Model):
         apps = new_apps
 
 
+class BookWithO2O(models.Model):
+    author = models.OneToOneField(Author)
+    title = models.CharField(max_length=100, db_index=True)
+    pub_date = models.DateTimeField()
+
+    class Meta:
+        apps = new_apps
+        db_table = "schema_book"
+
+
 class BookWithM2M(models.Model):
     author = models.ForeignKey(Author)
     title = models.CharField(max_length=100, db_index=True)
     pub_date = models.DateTimeField()
     tags = models.ManyToManyField("TagM2MTest", related_name="books")
+
+    class Meta:
+        apps = new_apps
+
+
+class BookWithoutFK(models.Model):
+    author = models.IntegerField()
+    title = models.CharField(max_length=100, db_index=True)
+    pub_date = models.DateTimeField()
 
     class Meta:
         apps = new_apps
@@ -163,3 +190,7 @@ class Thing(models.Model):
 
     def __str__(self):
         return self.when
+
+
+class Note(models.Model):
+    info = models.TextField()

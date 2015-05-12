@@ -213,8 +213,13 @@ will be.
 
 Be aware, however, that unmigrated apps cannot depend on migrated apps, by the
 very nature of not having migrations. This means that it is not generally
-possible to have an unmigrated app have a ForeignKey or ManyToManyField to
-a migrated app; some cases may work, but it will eventually fail.
+possible to have an unmigrated app have a ``ForeignKey`` or ``ManyToManyField``
+to a migrated app; some cases may work, but it will eventually fail.
+
+.. warning::
+
+    Even if things appear to work with unmigrated apps depending on migrated
+    apps, Django may not generate all the necessary foreign key constraints!
 
 This is particularly apparent if you use swappable models (e.g.
 ``AUTH_USER_MODEL``), as every app that uses swappable models will need
@@ -279,7 +284,7 @@ You can't modify the number of positional arguments in an already migrated
 custom field without raising a ``TypeError``. The old migration will call the
 modified ``__init__`` method with the old signature. So if you need a new
 argument, please create a keyword argument and add something like
-``assert kwargs.get('argument_name') is not None`` in the constructor.
+``assert 'argument_name' in kwargs`` in the constructor.
 
 Adding migrations to apps
 -------------------------
@@ -430,6 +435,36 @@ You can pass a second callable to
 want executed when migrating backwards. If this callable is omitted, migrating
 backwards will raise an exception.
 
+Accessing models from other apps
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When writing a ``RunPython`` function that uses models from apps other than the
+one in which the migration is located, the migration's ``dependencies``
+attribute should include the latest migration of each app that is involved,
+otherwise you may get an error similar to: ``LookupError: No installed app
+with label 'myappname'`` when you try to retrieve the model in the ``RunPython``
+function using ``apps.get_model()``.
+
+In the following example, we have a migration in ``app1`` which needs to use
+models in ``app2``. We aren't concerned with the details of ``move_m1`` other
+than the fact it will need to access models from both apps. Therefore we've
+added a dependency that specifies the last migration of ``app2``::
+
+    class Migration(migrations.Migration):
+
+        dependencies = [
+            ('app1', '0001_initial'),
+            # added dependency to enable using models from app2 in move_m1
+            ('app2', '0004_foobar'),
+        ]
+
+        operations = [
+            migrations.RunPython(move_m1),
+        ]
+
+More advanced migrations
+~~~~~~~~~~~~~~~~~~~~~~~~
+
 If you're interested in the more advanced migration operations, or want
 to be able to write your own, see the :doc:`migration operations reference
 </ref/migration-operations>`.
@@ -459,7 +494,7 @@ Once the operation sequence has been reduced as much as possible - the amount
 possible depends on how closely intertwined your models are and if you have
 any :class:`~django.db.migrations.operations.RunSQL`
 or :class:`~django.db.migrations.operations.RunPython` operations (which can't
-be optimized through) - Django will them write it back out into a new set of
+be optimized through) - Django will then write it back out into a new set of
 initial migration files.
 
 These files are marked to say they replace the previously-squashed migrations,
@@ -599,6 +634,7 @@ of three things ``(path, args, kwargs)``:
   ``__init__`` method. Every value should itself be serializable.
 
 .. note::
+
     This return value is different from the ``deconstruct()`` method
     :ref:`for custom fields <custom-field-deconstruct-method>` which returns a
     tuple of four items.
@@ -632,6 +668,40 @@ The decorator adds logic to capture and preserve the arguments on their
 way into your constructor, and then returns those arguments exactly when
 deconstruct() is called.
 
+Supporting Python 2 and 3
+-------------------------
+
+In order to generate migrations that support both Python 2 and 3, all string
+literals used in your models and fields (e.g. ``verbose_name``,
+``related_name``, etc.), must be consistently either bytestrings or text
+(unicode) strings in both Python 2 and 3 (rather than bytes in Python 2 and
+text in Python 3, the default situation for unmarked string literals.)
+Otherwise running :djadmin:`makemigrations` under Python 3 will generate
+spurious new migrations to convert all these string attributes to text.
+
+The easiest way to achieve this is to follow the advice in Django's
+:doc:`Python 3 porting guide </topics/python3>` and make sure that all your
+modules begin with ``from __future__ import unicode_literals``, so that all
+unmarked string literals are always unicode, regardless of Python version. When
+you add this to an app with existing migrations generated on Python 2, your
+next run of :djadmin:`makemigrations` on Python 3 will likely generate many
+changes as it converts all the bytestring attributes to text strings; this is
+normal and should only happen once.
+
+Supporting multiple Django versions
+-----------------------------------
+
+If you are the maintainer of a third-party app with models, you may need to
+ship migrations that support multiple Django versions. In this case, you should
+always run :djadmin:`makemigrations` **with the lowest Django version you wish
+to support**.
+
+The migrations system will maintain backwards-compatibility according to the
+same policy as the rest of Django, so migration files generated on Django X.Y
+should run unchanged on Django X.Y+1. The migrations system does not promise
+forwards-compatibility, however. New features may be added, and migration files
+generated with newer versions of Django may not work on older versions.
+
 .. _upgrading-from-south:
 
 Upgrading from South
@@ -649,7 +719,8 @@ If you already have pre-existing migrations created with
   migration directories and make new initial migrations in the new format.
 * Run ``python manage.py migrate``. Django will see that the tables for the
   initial migrations already exist and mark them as applied without running
-  them.
+  them. (Only matching table names are checked; not their full schema - it's up
+  to you to make sure the existing schema is up to date with your models!)
 
 That's it! The only complication is if you have a circular dependency loop
 of foreign keys; in this case, ``makemigrations`` might make more than one

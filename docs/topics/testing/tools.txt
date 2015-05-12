@@ -375,7 +375,7 @@ Testing responses
 
 The ``get()`` and ``post()`` methods both return a ``Response`` object. This
 ``Response`` object is *not* the same as the ``HttpResponse`` object returned
-Django views; the test response object has some additional data useful for
+by Django views; the test response object has some additional data useful for
 test code to verify.
 
 Specifically, a ``Response`` object has the following attributes:
@@ -475,14 +475,22 @@ can access these properties as part of a test condition.
     A dictionary-like object containing session information. See the
     :doc:`session documentation</topics/http/sessions>` for full details.
 
-    To modify the session and then save it, it must be stored in a variable
-    first (because a new ``SessionStore`` is created every time this property
-    is accessed)::
+    In Django 1.7, ``client.session`` returns a plain dictionary if the session
+    is empty. The following code creates a test client with a fully working
+    session engine::
 
-        def test_something(self):
-            session = self.client.session
-            session['somekey'] = 'test'
-            session.save()
+        from importlib import import_module
+
+        from django.conf import settings
+        from django.test import Client
+
+        def get_client_with_session(self):
+            client = Client()
+            engine = import_module(settings.SESSION_ENGINE)
+            s = engine.SessionStore()
+            s.save()
+            client.cookies[settings.SESSION_COOKIE_NAME] = s.session_key
+            return client
 
 Example
 ~~~~~~~
@@ -677,9 +685,9 @@ to change the default address (in the case, for example, where the 8081 port is
 already taken) then you may pass a different one to the :djadmin:`test` command
 via the :djadminopt:`--liveserver` option, for example:
 
-.. code-block:: bash
+.. code-block:: console
 
-    ./manage.py test --liveserver=localhost:8082
+    $ ./manage.py test --liveserver=localhost:8082
 
 Another way of changing the default server address is by setting the
 `DJANGO_LIVE_TEST_SERVER_ADDRESS` environment variable somewhere in your
@@ -697,9 +705,9 @@ tests might randomly fail with an "Address already in use" error. To avoid this
 problem, you can pass a comma-separated list of ports or ranges of ports (at
 least as many as the number of potential parallel processes). For example:
 
-.. code-block:: bash
+.. code-block:: console
 
-    ./manage.py test --liveserver=localhost:8082,8090-8100,9000-9200,7041
+    $ ./manage.py test --liveserver=localhost:8082,8090-8100,9000-9200,7041
 
 Then, during test execution, each new live test server will try every specified
 port until it finds one that is free and takes it.
@@ -710,9 +718,9 @@ To demonstrate how to use ``LiveServerTestCase``, let's write a simple Selenium
 test. First of all, you need to install the `selenium package`_ into your
 Python path:
 
-.. code-block:: bash
+.. code-block:: console
 
-   pip install selenium
+    $ pip install selenium
 
 Then, add a ``LiveServerTestCase``-based test to your app's tests module
 (for example: ``myapp/tests.py``). The code for this test may look as follows:
@@ -745,9 +753,9 @@ Then, add a ``LiveServerTestCase``-based test to your app's tests module
 
 Finally, you may run the test as follows:
 
-.. code-block:: bash
+.. code-block:: console
 
-    ./manage.py test myapp.MySeleniumTests.test_login
+    $ ./manage.py test myapp.tests.MySeleniumTests.test_login
 
 This example will automatically open Firefox then go to the login page, enter
 the credentials and press the "Log in" button. Selenium offers other drivers in
@@ -762,23 +770,15 @@ out the `full reference`_ for more details.
 
 .. versionchanged:: 1.7
 
-    Before Django 1.7 ``LiveServerTestCase`` used to rely on the
-    :doc:`staticfiles contrib app </howto/static-files/index>` to get the
-    static assets of the application(s) under test transparently served at their
-    expected locations during the execution of these tests.
+    In older versions, ``LiveServerTestCase`` relied on the :doc:`staticfiles
+    contrib app </howto/static-files/index>` to transparently serve static
+    files during the execution of tests. This functionality has been moved to
+    the :class:`~django.contrib.staticfiles.testing.StaticLiveServerTestCase`
+    subclass, so use that subclass if you need :ref:`the original behavior
+    <staticfiles-testing-support>`.
 
-    In Django 1.7 this dependency of core functionality on a ``contrib``
-    application has been removed, because of which ``LiveServerTestCase``
-    ability in this respect has been retrofitted to simply publish the contents
-    of the file system under :setting:`STATIC_ROOT` at the :setting:`STATIC_URL`
-    URL.
-
-    If you use the ``staticfiles`` app in your project and need to perform live
-    testing then you might want to consider using the
-    :class:`~django.contrib.staticfiles.testing.StaticLiveServerTestCase`
-    subclass shipped with it instead because it's the one that implements the
-    original behavior now. See :ref:`the relevant documentation
-    <staticfiles-testing-support>` for more details.
+    ``LiveServerTestCase`` now simply publishes the contents of the file system
+    under :setting:`STATIC_ROOT` at the :setting:`STATIC_URL`.
 
 .. note::
 
@@ -870,7 +870,8 @@ attribute::
     from django.test import TestCase, Client
 
     class MyTestClient(Client):
-        # Specialized methods for your environment...
+        # Specialized methods for your environment
+        ...
 
     class MyTest(TestCase):
         client_class = MyTestClient
@@ -1033,6 +1034,12 @@ If ``multi_db=True``, fixtures are loaded into all databases.
 
 Overriding settings
 ~~~~~~~~~~~~~~~~~~~
+
+.. warning::
+
+    Use the functions below to temporarily alter the value of settings in tests.
+    Don't manipulate ``django.conf.settings`` directly as Django won't restore
+    the original values after such manipulations.
 
 .. method:: SimpleTestCase.settings()
 
@@ -1561,6 +1568,25 @@ manually, assign the empty list to ``mail.outbox``::
 
     # Empty the test outbox
     mail.outbox = []
+
+.. _topics-testing-management-commands:
+
+Management Commands
+-------------------
+
+Management commands can be tested with the
+:func:`~django.core.management.call_command` function. The output can be
+redirected into a ``StringIO`` instance::
+
+    from django.core.management import call_command
+    from django.test import TestCase
+    from django.utils.six import StringIO
+
+    class ClosepollTest(TestCase):
+        def test_command_output(self):
+            out = StringIO()
+            call_command('closepoll', stdout=out)
+            self.assertIn('Expected output', out.getvalue())
 
 .. _skipping-tests:
 

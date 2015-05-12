@@ -259,7 +259,7 @@ class RelatedField(Field):
             sup.contribute_to_class(cls, name, virtual_only=virtual_only)
 
         if not cls._meta.abstract and self.rel.related_name:
-            related_name = self.rel.related_name % {
+            related_name = force_text(self.rel.related_name) % {
                 'class': cls.__name__.lower(),
                 'app_label': cls._meta.app_label.lower()
             }
@@ -855,6 +855,9 @@ def create_many_related_manager(superclass, rel):
             )
         do_not_call_in_templates = True
 
+        def __str__(self):
+            return repr(self)
+
         def _build_remove_filters(self, removed_vals):
             filters = Q(**{self.source_field_name: self.related_val})
             # No need to add a subquery condition if removed_vals is a QuerySet without
@@ -1382,7 +1385,7 @@ class ForeignObject(RelatedField):
         kwargs['from_fields'] = self.from_fields
         kwargs['to_fields'] = self.to_fields
         if self.rel.related_name is not None:
-            kwargs['related_name'] = force_text(self.rel.related_name)
+            kwargs['related_name'] = self.rel.related_name
         if self.rel.related_query_name is not None:
             kwargs['related_query_name'] = self.rel.related_query_name
         if self.rel.on_delete != CASCADE:
@@ -2118,7 +2121,7 @@ class ManyToManyField(RelatedField):
         if self.rel.db_constraint is not True:
             kwargs['db_constraint'] = self.rel.db_constraint
         if self.rel.related_name is not None:
-            kwargs['related_name'] = force_text(self.rel.related_name)
+            kwargs['related_name'] = self.rel.related_name
         if self.rel.related_query_name is not None:
             kwargs['related_query_name'] = self.rel.related_query_name
         # Rel needs more work.

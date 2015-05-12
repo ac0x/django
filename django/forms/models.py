@@ -331,11 +331,9 @@ class BaseModelForm(BaseForm):
         # Apply ``limit_choices_to`` to each field.
         for field_name in self.fields:
             formfield = self.fields[field_name]
-            if hasattr(formfield, 'queryset'):
-                limit_choices_to = formfield.limit_choices_to
+            if hasattr(formfield, 'queryset') and hasattr(formfield, 'get_limit_choices_to'):
+                limit_choices_to = formfield.get_limit_choices_to()
                 if limit_choices_to is not None:
-                    if callable(limit_choices_to):
-                        limit_choices_to = limit_choices_to()
                     formfield.queryset = formfield.queryset.complex_filter(limit_choices_to)
 
     def _get_validation_exclusions(self):
@@ -573,7 +571,7 @@ class BaseModelFormSet(BaseFormSet):
     def _get_to_python(self, field):
         """
         If the field is a related field, fetch the concrete field's (that
-        is, the ultimate pointed-to field's) get_prep_value.
+        is, the ultimate pointed-to field's) to_python.
         """
         while field.rel is not None:
             field = field.rel.get_related_field()
@@ -1120,6 +1118,17 @@ class ModelChoiceField(ChoiceField):
         self.choice_cache = None
         self.to_field_name = to_field_name
 
+    def get_limit_choices_to(self):
+        """
+        Returns ``limit_choices_to`` for this form field.
+
+        If it is a callable, it will be invoked and the result will be
+        returned.
+        """
+        if callable(self.limit_choices_to):
+            return self.limit_choices_to()
+        return self.limit_choices_to
+
     def __deepcopy__(self, memo):
         result = super(ChoiceField, self).__deepcopy__(memo)
         # Need to force a new ModelChoiceIterator to be created, bug #11183
@@ -1214,8 +1223,7 @@ class ModelMultipleChoiceField(ModelChoiceField):
     def to_python(self, value):
         if not value:
             return []
-        to_py = super(ModelMultipleChoiceField, self).to_python
-        return [to_py(val) for val in value]
+        return list(self._check_values(value))
 
     def clean(self, value):
         if self.required and not value:
@@ -1224,7 +1232,29 @@ class ModelMultipleChoiceField(ModelChoiceField):
             return self.queryset.none()
         if not isinstance(value, (list, tuple)):
             raise ValidationError(self.error_messages['list'], code='list')
+        qs = self._check_values(value)
+        # Since this overrides the inherited ModelChoiceField.clean
+        # we run custom validators here
+        self.run_validators(value)
+        return qs
+
+    def _check_values(self, value):
+        """
+        Given a list of possible PK values, returns a QuerySet of the
+        corresponding objects. Raises a ValidationError if a given value is
+        invalid (not a valid PK, not in the queryset, etc.)
+        """
         key = self.to_field_name or 'pk'
+        # deduplicate given values to avoid creating many querysets or
+        # requiring the database backend deduplicate efficiently.
+        try:
+            value = frozenset(value)
+        except TypeError:
+            # list of lists isn't hashable, for example
+            raise ValidationError(
+                self.error_messages['list'],
+                code='list',
+            )
         for pk in value:
             try:
                 self.queryset.filter(**{key: pk})
@@ -1243,9 +1273,6 @@ class ModelMultipleChoiceField(ModelChoiceField):
                     code='invalid_choice',
                     params={'value': val},
                 )
-        # Since this overrides the inherited ModelChoiceField.clean
-        # we run custom validators here
-        self.run_validators(value)
         return qs
 
     def prepare_value(self, value):

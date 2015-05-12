@@ -278,8 +278,13 @@ don't need to set ``primary_key=True`` on any of your fields unless you want to
 override the default primary-key behavior. For more, see
 :ref:`automatic-primary-key-fields`.
 
-``primary_key=True`` implies :attr:`null=False <Field.null>` and :attr:`unique=True <Field.unique>`.
-Only one primary key is allowed on an object.
+``primary_key=True`` implies :attr:`null=False <Field.null>` and
+:attr:`unique=True <Field.unique>`. Only one primary key is allowed on an
+object.
+
+The primary key field is read-only. If you change the value of the primary
+key on an existing object and then save it, a new object will be created
+alongside the old one.
 
 ``unique``
 ----------
@@ -496,6 +501,15 @@ message key.
     ``True`` will cause the field to have ``editable=False`` and ``blank=True``
     set.
 
+.. note::
+    The ``auto_now`` and ``auto_now_add`` options will always use the date in
+    the :ref:`default timezone <default-current-time-zone>` at the moment of
+    creation or update. If you need something different, you may want to
+    consider simply using your own callable default or overriding ``save()``
+    instead of using ``auto_now`` or ``auto_now_add``; or using a
+    ``DateTimeField`` instead of a ``DateField`` and deciding how to handle the
+    conversion from datetime to date at display time.
+
 ``DateTimeField``
 -----------------
 
@@ -689,8 +703,9 @@ FileField and FieldFile
 
 When you access a :class:`~django.db.models.FileField` on a model, you are
 given an instance of :class:`FieldFile` as a proxy for accessing the underlying
-file. This class has several attributes and methods that can be used to
-interact with file data:
+file. In addition to the functionality inherited from
+:class:`django.core.files.File`, this class has several attributes and methods
+that can be used to interact with file data:
 
 .. attribute:: FieldFile.url
 
@@ -718,8 +733,9 @@ method is used to persist that file data.
 
 Takes two required arguments: ``name`` which is the name of the file, and
 ``content`` which is an object containing the file's contents.  The
-optional ``save`` argument controls whether or not the instance is
-saved after the file has been altered. Defaults to ``True``.
+optional ``save`` argument controls whether or not the model instance is
+saved after the file associated with this field has been altered. Defaults to
+``True``.
 
 Note that the ``content`` argument should be an instance of
 :class:`django.core.files.File`, not Python's built-in file object.
@@ -744,8 +760,9 @@ Deletes the file associated with this instance and clears all attributes on
 the field. Note: This method will close the file if it happens to be open when
 ``delete()`` is called.
 
-The optional ``save`` argument controls whether or not the instance is saved
-after the file has been deleted. Defaults to ``True``.
+The optional ``save`` argument controls whether or not the model instance is
+saved after the file associated with this field has been deleted. Defaults to
+``True``.
 
 Note that when a model is deleted, related files are not deleted. If you need
 to cleanup orphaned files, you'll need to handle it yourself (for instance,
@@ -1237,14 +1254,16 @@ The possible values for :attr:`~ForeignKey.on_delete` are found in
     necessary to avoid executing queries at the time your models.py is
     imported::
 
+        from django.conf import settings
+        from django.contrib.auth import get_user_model
         from django.db import models
-        from django.contrib.auth.models import User
 
         def get_sentinel_user():
-            return User.objects.get_or_create(username='deleted')[0]
+            return get_user_model().objects.get_or_create(username='deleted')[0]
 
         class MyModel(models.Model):
-            user = models.ForeignKey(User, on_delete=models.SET(get_sentinel_user))
+            user = models.ForeignKey(settings.AUTH_USER_MODEL,
+                                     on_delete=models.SET(get_sentinel_user))
 
 * .. attribute:: DO_NOTHING
 
@@ -1370,13 +1389,25 @@ that control how the relationship functions.
 
     If you don't specify an explicit ``through`` model, there is still an
     implicit ``through`` model class you can use to directly access the table
-    created to hold the association. It has three fields:
+    created to hold the association. It has three fields to link the models.
+
+    If the source and target models differ, the following fields are
+    generated:
 
     * ``id``: the primary key of the relation.
     * ``<containing_model>_id``: the ``id`` of the model that declares the
       ``ManyToManyField``.
     * ``<other_model>_id``: the ``id`` of the model that the
       ``ManyToManyField`` points to.
+
+    If the ``ManyToManyField`` points from and to the same model, the following 
+    fields are generated:
+
+    * ``id``: the primary key of the relation.
+    * ``from_<model>_id``: the ``id`` of the instance which points at the
+      model (i.e. the source instance).
+    * ``to_<model>_id``: the ``id`` of the instance to which the relationship
+      points (i.e. the target model instance).
 
     This class can be used to query associated records for a given model
     instance like a normal model.
@@ -1498,12 +1529,12 @@ as default value.
 
 With the following example::
 
+    from django.conf import settings
     from django.db import models
-    from django.contrib.auth.models import User
 
     class MySpecialUser(models.Model):
-        user = models.OneToOneField(User)
-        supervisor = models.OneToOneField(User, related_name='supervisor_of')
+        user = models.OneToOneField(settings.AUTH_USER_MODEL)
+        supervisor = models.OneToOneField(settings.AUTH_USER_MODEL, related_name='supervisor_of')
 
 your resulting ``User`` model will have the following attributes::
 
@@ -1567,7 +1598,7 @@ Field API reference
 
     All of Django's built-in fields, such as :class:`CharField`, are particular
     implementations of ``Field``. If you need a custom field, you can either
-    subclass any of the built-in fields or write a ``Field``` from scratch. In
+    subclass any of the built-in fields or write a ``Field`` from scratch. In
     either case, see :doc:`/howto/custom-model-fields`.
 
     .. attribute:: description

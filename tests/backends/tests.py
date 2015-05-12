@@ -233,6 +233,34 @@ class PostgreSQLTests(TestCase):
         finally:
             new_connection.close()
 
+    def test_connect_isolation_level(self):
+        """
+        Regression test for #18130 and #24318.
+        """
+        from psycopg2.extensions import (
+            ISOLATION_LEVEL_READ_COMMITTED as read_committed,
+            ISOLATION_LEVEL_SERIALIZABLE as serializable,
+        )
+
+        # Since this is a django.test.TestCase, a transaction is in progress
+        # and the isolation level isn't reported as 0. This test assumes that
+        # PostgreSQL is configured with the default isolation level.
+
+        # Check the level on the psycopg2 connection, not the Django wrapper.
+        self.assertEqual(connection.connection.isolation_level, read_committed)
+
+        databases = copy.deepcopy(settings.DATABASES)
+        databases[DEFAULT_DB_ALIAS]['OPTIONS']['isolation_level'] = serializable
+        new_connections = ConnectionHandler(databases)
+        new_connection = new_connections[DEFAULT_DB_ALIAS]
+        try:
+            # Start a transaction so the isolation level isn't reported as 0.
+            new_connection.set_autocommit(False)
+            # Check the level on the psycopg2 connection, not the Django wrapper.
+            self.assertEqual(new_connection.connection.isolation_level, serializable)
+        finally:
+            new_connection.close()
+
     def _select(self, val):
         with connection.cursor() as cursor:
             cursor.execute("SELECT %s", (val,))
@@ -950,7 +978,7 @@ class DBConstraintTestCase(TransactionTestCase):
 
     available_apps = ['backends']
 
-    def test_can_reference_existant(self):
+    def test_can_reference_existent(self):
         obj = models.Object.objects.create()
         ref = models.ObjectReference.objects.create(obj=obj)
         self.assertEqual(ref.obj, obj)
@@ -958,7 +986,7 @@ class DBConstraintTestCase(TransactionTestCase):
         ref = models.ObjectReference.objects.get(obj=obj)
         self.assertEqual(ref.obj, obj)
 
-    def test_can_reference_non_existant(self):
+    def test_can_reference_non_existent(self):
         self.assertFalse(models.Object.objects.filter(id=12345).exists())
         ref = models.ObjectReference.objects.create(obj_id=12345)
         ref_new = models.ObjectReference.objects.get(obj_id=12345)

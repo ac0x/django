@@ -5,7 +5,8 @@ import io
 import os
 import re
 import shutil
-from unittest import SkipTest, skipUnless
+import sys
+from unittest import expectedFailure, SkipTest, skipUnless
 import warnings
 
 from django.conf import settings
@@ -211,6 +212,10 @@ class BasicExtractorTests(ExtractorTests):
         self.assertIn("UnicodeDecodeError: skipped file not_utf8.txt in .",
                       force_text(stdout.getvalue()))
 
+    # This issue is fixed in 1.8+ (#23312).
+    if six.PY3 and sys.platform.startswith('win'):
+        test_unicode_decode_error = expectedFailure(test_unicode_decode_error)
+
     def test_extraction_warning(self):
         """test xgettext warning about multiple bare interpolation placeholders"""
         os.chdir(self.test_dir)
@@ -357,6 +362,14 @@ class JavascriptExtractorTests(ExtractorTests):
         _, po_contents = self._run_makemessages(domain='djangojs')
         self.assertMsgId("Static content inside app should be included.", po_contents)
         self.assertNotMsgId("Content from STATIC_ROOT should not be included", po_contents)
+
+    @override_settings(STATIC_ROOT=None, MEDIA_ROOT='')
+    def test_default_root_settings(self):
+        """
+        Regression test for #23717.
+        """
+        _, po_contents = self._run_makemessages(domain='djangojs')
+        self.assertMsgId("Static content inside app should be included.", po_contents)
 
 
 class IgnoredExtractorTests(ExtractorTests):

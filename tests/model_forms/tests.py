@@ -1097,7 +1097,7 @@ class ModelFormBasicTests(TestCase):
         self.assertEqual(f.cleaned_data['slug'], 'entertainment')
         self.assertEqual(f.cleaned_data['url'], 'entertainment')
         c1 = f.save()
-        # Testing wether the same object is returned from the
+        # Testing whether the same object is returned from the
         # ORM... not the fastest way...
 
         self.assertEqual(Category.objects.count(), 1)
@@ -1572,6 +1572,27 @@ class ModelMultipleChoiceFieldTests(TestCase):
                                 'persons': [str(person2.pk)]})
         self.assertTrue(form.is_valid())
         self.assertTrue(form.has_changed())
+
+    def test_show_hidden_initial_changed_queries_efficiently(self):
+        class WriterForm(forms.Form):
+            persons = forms.ModelMultipleChoiceField(
+                show_hidden_initial=True, queryset=Writer.objects.all())
+
+        writers = (Writer.objects.create(name=str(x)) for x in range(0, 50))
+        writer_pks = tuple(x.pk for x in writers)
+        form = WriterForm(data={'initial-persons': writer_pks})
+        with self.assertNumQueries(1):
+            self.assertTrue(form.has_changed())
+
+    def test_clean_does_deduplicate_values(self):
+        class WriterForm(forms.Form):
+            persons = forms.ModelMultipleChoiceField(queryset=Writer.objects.all())
+
+        person1 = Writer.objects.create(name="Person 1")
+        form = WriterForm(data={})
+        queryset = form.fields['persons'].clean([str(person1.pk)] * 50)
+        sql, params = queryset.query.sql_with_params()
+        self.assertEqual(len(params), 1)
 
 
 class ModelOneToOneFieldTests(TestCase):
@@ -2207,6 +2228,13 @@ class ModelFormCustomErrorTests(TestCase):
             str(form.errors['name1']),
             '<ul class="errorlist"><li>Model.clean() error messages.</li></ul>'
         )
+        data = {'name1': 'FORBIDDEN_VALUE2', 'name2': 'ABC'}
+        form = CustomErrorMessageForm(data)
+        self.assertFalse(form.is_valid())
+        self.assertHTMLEqual(
+            str(form.errors['name1']),
+            '<ul class="errorlist"><li>Model.clean() error messages (simpler syntax).</li></ul>'
+        )
         data = {'name1': 'GLOBAL_ERROR', 'name2': 'ABC'}
         form = CustomErrorMessageForm(data)
         self.assertFalse(form.is_valid())
@@ -2345,6 +2373,18 @@ class StumpJokeForm(forms.ModelForm):
         fields = '__all__'
 
 
+class CustomFieldWithQuerysetButNoLimitChoicesTo(forms.Field):
+    queryset = 42
+
+
+class StumpJokeWithCustomFieldForm(forms.ModelForm):
+    custom = CustomFieldWithQuerysetButNoLimitChoicesTo()
+
+    class Meta:
+        model = StumpJoke
+        fields = ()  # We don't need any fields from the model
+
+
 class LimitChoicesToTest(TestCase):
     """
     Tests the functionality of ``limit_choices_to``.
@@ -2374,6 +2414,14 @@ class LimitChoicesToTest(TestCase):
         stumpjokeform = StumpJokeForm()
         self.assertIn(self.threepwood, stumpjokeform.fields['has_fooled_today'].queryset)
         self.assertNotIn(self.marley, stumpjokeform.fields['has_fooled_today'].queryset)
+
+    def test_custom_field_with_queryset_but_no_limit_choices_to(self):
+        """
+        Regression test for #23795: Make sure a custom field with a `queryset`
+        attribute but no `limit_choices_to` still works.
+        """
+        f = StumpJokeWithCustomFieldForm()
+        self.assertEqual(f.fields['custom'].queryset, 42)
 
 
 class FormFieldCallbackTests(TestCase):

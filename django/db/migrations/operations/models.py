@@ -106,8 +106,6 @@ class RenameModel(Operation):
     Renames a model.
     """
 
-    reversible = False
-
     def __init__(self, old_name, new_name):
         self.old_name = old_name
         self.new_name = new_name
@@ -124,6 +122,10 @@ class RenameModel(Operation):
         del state.models[app_label, self.old_name.lower()]
         # Repoint the FKs and M2Ms pointing to us
         for related_object in (related_objects + related_m2m_objects):
+            if related_object.field.rel.to is not model:
+                # The model being renamed does not participate in this relation
+                # directly. Rather, a superclass does.
+                continue
             # Use the new related key for self referential related objects.
             if related_object.model == model:
                 related_key = (app_label, self.new_name.lower())
@@ -141,11 +143,11 @@ class RenameModel(Operation):
             state.models[related_key].fields = new_fields
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
-        old_apps = from_state.render()
         new_apps = to_state.render()
-        old_model = old_apps.get_model(app_label, self.old_name)
         new_model = new_apps.get_model(app_label, self.new_name)
         if self.allowed_to_migrate(schema_editor.connection.alias, new_model):
+            old_apps = from_state.render()
+            old_model = old_apps.get_model(app_label, self.old_name)
             # Move the main table
             schema_editor.alter_db_table(
                 new_model,
@@ -172,6 +174,27 @@ class RenameModel(Operation):
                     model,
                     related_object.field,
                     to_field,
+                )
+            # Rename M2M fields whose name is based on this model's name.
+            fields = zip(old_model._meta.local_many_to_many, new_model._meta.local_many_to_many)
+            for (old_field, new_field) in fields:
+                # Skip self-referential fields as these are renamed above.
+                if new_field.model == new_field.related.parent_model or not new_field.rel.through._meta.auto_created:
+                    continue
+                # Rename the M2M table that's based on this model's name.
+                old_m2m_model = old_field.rel.through
+                new_m2m_model = new_field.rel.through
+                schema_editor.alter_db_table(
+                    new_m2m_model,
+                    old_m2m_model._meta.db_table,
+                    new_m2m_model._meta.db_table,
+                )
+                # Rename the column in the M2M table that's based on this
+                # model's name.
+                schema_editor.alter_field(
+                    new_m2m_model,
+                    old_m2m_model._meta.get_field(old_model._meta.model_name),
+                    new_m2m_model._meta.get_field(new_model._meta.model_name),
                 )
 
     def database_backwards(self, app_label, schema_editor, from_state, to_state):
@@ -202,11 +225,11 @@ class AlterModelTable(Operation):
         state.models[app_label, self.name.lower()].options["db_table"] = self.table
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
-        old_apps = from_state.render()
         new_apps = to_state.render()
-        old_model = old_apps.get_model(app_label, self.name)
         new_model = new_apps.get_model(app_label, self.name)
         if self.allowed_to_migrate(schema_editor.connection.alias, new_model):
+            old_apps = from_state.render()
+            old_model = old_apps.get_model(app_label, self.name)
             schema_editor.alter_db_table(
                 new_model,
                 old_model._meta.db_table,
@@ -248,11 +271,11 @@ class AlterUniqueTogether(Operation):
         model_state.options[self.option_name] = self.unique_together
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
-        old_apps = from_state.render()
         new_apps = to_state.render()
-        old_model = old_apps.get_model(app_label, self.name)
         new_model = new_apps.get_model(app_label, self.name)
         if self.allowed_to_migrate(schema_editor.connection.alias, new_model):
+            old_apps = from_state.render()
+            old_model = old_apps.get_model(app_label, self.name)
             schema_editor.alter_unique_together(
                 new_model,
                 getattr(old_model._meta, self.option_name, set()),
@@ -286,11 +309,11 @@ class AlterIndexTogether(Operation):
         model_state.options[self.option_name] = self.index_together
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
-        old_apps = from_state.render()
         new_apps = to_state.render()
-        old_model = old_apps.get_model(app_label, self.name)
         new_model = new_apps.get_model(app_label, self.name)
         if self.allowed_to_migrate(schema_editor.connection.alias, new_model):
+            old_apps = from_state.render()
+            old_model = old_apps.get_model(app_label, self.name)
             schema_editor.alter_index_together(
                 new_model,
                 getattr(old_model._meta, self.option_name, set()),
@@ -321,9 +344,9 @@ class AlterOrderWithRespectTo(Operation):
         model_state.options['order_with_respect_to'] = self.order_with_respect_to
 
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
-        from_model = from_state.render().get_model(app_label, self.name)
         to_model = to_state.render().get_model(app_label, self.name)
         if self.allowed_to_migrate(schema_editor.connection.alias, to_model):
+            from_model = from_state.render().get_model(app_label, self.name)
             # Remove a field if we need to
             if from_model._meta.order_with_respect_to and not to_model._meta.order_with_respect_to:
                 schema_editor.remove_field(from_model, from_model._meta.get_field_by_name("_order")[0])
@@ -331,6 +354,8 @@ class AlterOrderWithRespectTo(Operation):
             # it's likely a rename)
             elif to_model._meta.order_with_respect_to and not from_model._meta.order_with_respect_to:
                 field = to_model._meta.get_field_by_name("_order")[0]
+                if not field.has_default():
+                    field.default = 0
                 schema_editor.add_field(
                     from_model,
                     field,
@@ -356,6 +381,7 @@ class AlterModelOptions(Operation):
     # Model options we want to compare and preserve in an AlterModelOptions op
     ALTER_OPTION_KEYS = [
         "get_latest_by",
+        "managed",
         "ordering",
         "permissions",
         "default_permissions",

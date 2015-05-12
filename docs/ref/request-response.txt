@@ -147,8 +147,9 @@ All attributes should be considered read-only, unless stated otherwise below.
     Available headers depend on the client and server, but here are some
     examples:
 
-    * ``CONTENT_LENGTH`` -- the length of the request body (as a string).
-    * ``CONTENT_TYPE`` -- the MIME type of the request body.
+    * ``CONTENT_LENGTH`` -- The length of the request body (as a string).
+    * ``CONTENT_TYPE`` -- The MIME type of the request body.
+    * ``HTTP_ACCEPT`` -- Acceptable content types for the response.
     * ``HTTP_ACCEPT_ENCODING`` -- Acceptable encodings for the response.
     * ``HTTP_ACCEPT_LANGUAGE`` -- Acceptable languages for the response.
     * ``HTTP_HOST`` -- The HTTP Host header sent by the client.
@@ -308,11 +309,11 @@ Methods
 
 .. method:: HttpRequest.is_ajax()
 
-   Returns ``True`` if the request was made via an ``XMLHttpRequest``, by
-   checking the ``HTTP_X_REQUESTED_WITH`` header for the string
-   ``'XMLHttpRequest'``. Most modern JavaScript libraries send this header.
-   If you write your own XMLHttpRequest call (on the browser side), you'll
-   have to set this header manually if you want ``is_ajax()`` to work.
+    Returns ``True`` if the request was made via an ``XMLHttpRequest``, by
+    checking the ``HTTP_X_REQUESTED_WITH`` header for the string
+    ``'XMLHttpRequest'``. Most modern JavaScript libraries send this header.
+    If you write your own XMLHttpRequest call (on the browser side), you'll
+    have to set this header manually if you want ``is_ajax()`` to work.
 
     If a response varies on whether or not it's requested via AJAX and you are
     using some form of caching like Django's :mod:`cache middleware
@@ -367,7 +368,7 @@ a subclass of dictionary. Exceptions are outlined here:
    Instantiates a ``QueryDict`` object based on ``query_string``.
 
           >>> QueryDict('a=1&a=2&c=3')
-          <QueryDict: {u'a': [u'1', u'2'], u'b': [u'1']}>
+          <QueryDict: {'a': ['1', '2'], 'c': ['3']}>
 
    Most ``QueryDict``\ s you encounter, and in particular those at
    ``request.POST`` and ``request.GET``, will be immutable. If you are
